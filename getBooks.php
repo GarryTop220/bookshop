@@ -5,7 +5,7 @@ header('Content-Type: application/json');
 header('Access-Control-Allow-Headers: Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With, Cookie');
 header("Access-Control-Allow-Credentials: true");
 
-include('database/connection.php');
+include('connection.php');
 
 $sql = "SELECT name, author, description,
         price, genre, is_new, img_src

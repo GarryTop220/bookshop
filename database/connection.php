@@ -1,8 +1,8 @@
 <?php
-	$HOST = 'localhost';
-	$USER = 'testbookproject';
-	$PASS = '7jx2+-n7KE';
-	$DB = 'testbookproject';
+	$HOST = 'mysql.railway.internal';
+	$USER = 'root';
+	$PASS = 'aXGnEnpUJZUgJHBZTNSOlpisswEMAtCr';
+	$DB = 'railway';
 	$conn = mysqli_connect($HOST,$USER,$PASS,$DB)
         or die("Couldn't connect to database");
 	mysqli_set_charset($conn,"utf8");

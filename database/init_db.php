@@ -9,6 +9,17 @@ $conn = mysqli_connect($HOST, $USER, $PASS, $DB, $PORT)
     or die("Connection error: " . mysqli_connect_error());
 mysqli_set_charset($conn, "utf8");
 
+$tables = [
+    'order_details', 'orders', 'delivery', 
+    'cart_details', 'cart', 'books', 'genres', 'users'
+];
+
+// 1. Видаляємо всі таблиці
+foreach ($tables as $table) {
+    $conn->query("DROP TABLE IF EXISTS $table");
+    echo "Таблиця $table видалена<br>";
+}
+
 $sql = <<<SQL
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,

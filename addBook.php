@@ -8,26 +8,25 @@ header("Access-Control-Allow-Credentials: true");
 include('database/connection.php');
 include('database/domain.php');
 
-// Функція для логування помилок
 function log_error($message) {
     error_log($message);
     return json_encode(['error' => $message]);
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Перевірка наявності обов'язкових даних
-    $required_fields = ['name', 'author', 'description', 'price', 'genre'];
-    foreach ($required_fields as $field) {
+    // Валідація вхідних даних
+    $required = ['name', 'author', 'description', 'price', 'genre'];
+    foreach ($required as $field) {
         if (empty($_POST[$field])) {
-            die(log_error("Необхідне поле '$field' відсутнє."));
+            die(log_error("Необхідне поле '$field' відсутнє"));
         }
     }
 
     if (empty($_FILES['image'])) {
-        die(log_error("Зображення не було завантажено."));
+        die(log_error("Зображення не завантажено"));
     }
 
-    // Отримання даних з форми
+    // Отримання даних
     $name = trim($_POST['name']);
     $author = trim($_POST['author']);
     $description = trim($_POST['description']);
@@ -35,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $genre = trim($_POST['genre']);
     $isNew = isset($_POST['isNew']) ? (int)$_POST['isNew'] : 0;
 
-    // Визначення шляхів для зображень
+    // Визначення шляху для зберігання
     $genres = [
         'Детективи' => "detective",
         'Фентезі' => "fantasy",
@@ -43,92 +42,75 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'Романтична проза' => "love_novels",
         'Комікси' => "comics"
     ];
-
+    
     $genre_folder = $genres[$genre] ?? 'other';
-    $base_dir = __DIR__ . '/src/assets/photo_books/';
-    $target_dir = $base_dir . $genre_folder . '/';
+    $storage_path = '/storage/books/'; // Змінено шлях для Railway
+    $target_dir = $storage_path . $genre_folder . '/';
 
-    // Створення директорій, якщо вони не існують
-    if (!file_exists($base_dir)) {
-        if (!mkdir($base_dir, 0777, true)) {
-            die(log_error("Не вдалося створити базову директорію для зображень."));
-        }
+    // Створення директорії з правильними дозволами
+    if (!file_exists($storage_path)) {
+        mkdir($storage_path, 0777, true);
     }
-
+    
     if (!file_exists($target_dir)) {
-        if (!mkdir($target_dir, 0777, true)) {
-            die(log_error("Не вдалося створити директорію для жанру."));
-        }
+        mkdir($target_dir, 0777, true);
     }
 
-    // Перевірка прав доступу
+    // Додаткова перевірка дозволів
     if (!is_writable($target_dir)) {
-        die(log_error("Директорія не доступна для запису: " . $target_dir));
+        chmod($target_dir, 0777);
+        if (!is_writable($target_dir)) {
+            die(log_error("Не вдалося отримати права на запис в директорію"));
+        }
     }
 
     // Обробка зображення
     $image = $_FILES['image'];
-    $original_name = basename($image['name']);
-    $file_extension = strtolower(pathinfo($original_name, PATHINFO_EXTENSION));
-    $new_filename = uniqid('book_', true) . '.' . $file_extension;
+    $ext = strtolower(pathinfo($image['name'], PATHINFO_EXTENSION));
+    $new_filename = uniqid('book_', true) . '.' . $ext;
     $target_file = $target_dir . $new_filename;
 
-    // Перевірка типу файлу
-    $allowed_types = ['jpg', 'jpeg', 'png', 'gif'];
-    if (!in_array($file_extension, $allowed_types)) {
-        die(log_error("Дозволені лише JPG, JPEG, PNG та GIF файли."));
+    // Валідація зображення
+    $allowed = ['jpg', 'jpeg', 'png', 'gif'];
+    if (!in_array($ext, $allowed) || !getimagesize($image['tmp_name'])) {
+        die(log_error("Недійсний формат зображення"));
     }
 
-    // Перевірка, чи файл є зображенням
-    if (!getimagesize($image['tmp_name'])) {
-        die(log_error("Файл не є зображенням."));
-    }
-
-    // Перевірка розміру файлу (макс. 5MB)
     if ($image['size'] > 5000000) {
-        die(log_error("Файл зображення занадто великий. Максимальний розмір: 5MB."));
+        die(log_error("Розмір файлу перевищує 5MB"));
     }
 
-    // Переміщення завантаженого файлу
+    // Завантаження файлу
     if (!move_uploaded_file($image['tmp_name'], $target_file)) {
-        $error = error_get_last();
-        die(log_error("Помилка при завантаженні зображення: " . ($error['message'] ?? 'невідома помилка')));
+        die(log_error("Помилка завантаження файлу"));
     }
 
-    // Формування URL зображення
-    $img_relative_path = "src/assets/photo_books/$genre_folder/$new_filename";
-    $img_src = $domain . $img_relative_path;
-
-    // Додавання книги до бази даних
+    // Збереження в БД
     try {
-        $sql = "INSERT INTO books(name, author, description, price, genre, img_src, is_new) VALUES (?, ?, ?, ?, ?, ?, ?)";
-        $stmt = $conn->prepare($sql);
+        $img_src = $domain . '/storage/books/' . $genre_folder . '/' . $new_filename;
+        
+        $stmt = $conn->prepare("INSERT INTO books(name, author, description, price, genre, img_src, is_new) VALUES (?, ?, ?, ?, ?, ?, ?)");
         $stmt->bind_param("sssdssi", $name, $author, $description, $price, $genre, $img_src, $isNew);
         
         if (!$stmt->execute()) {
-            // Якщо помилка в БД, видаляємо завантажене зображення
             unlink($target_file);
-            die(log_error("Помилка при додаванні книги: " . $stmt->error));
+            die(log_error("Помилка бази даних: " . $stmt->error));
         }
 
         echo json_encode([
             'success' => true,
-            'message' => 'Книга успішно додана.',
-            'book' => [
-                'name' => $name,
-                'author' => $author,
-                'img_src' => $img_src
-            ]
+            'message' => 'Книга додана успішно',
+            'image_path' => $img_src
         ]);
 
     } catch (Exception $e) {
-        unlink($target_file);
-        die(log_error("Виникла помилка: " . $e->getMessage()));
+        if (file_exists($target_file)) unlink($target_file);
+        die(log_error("Системна помилка: " . $e->getMessage()));
     } finally {
         if (isset($stmt)) $stmt->close();
         $conn->close();
     }
 } else {
-    die(log_error("Метод не дозволений."));
+    die(log_error("Недопустимий метод запиту"));
 }
 ?>

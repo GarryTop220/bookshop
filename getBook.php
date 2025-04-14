@@ -8,7 +8,7 @@ header("Access-Control-Allow-Credentials: true");
 include('database/connection.php');
 
 $id = intval($_GET['id']);
-$sql = "SELECT name, author, description, price, genre, is_new, img_src
+$sql = "SELECT id, name, author, description, price, genre, is_new, img_src
         FROM books 
         WHERE id = ?;";
 $stmt = $conn->prepare($sql);

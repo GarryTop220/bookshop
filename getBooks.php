@@ -7,7 +7,7 @@ header("Access-Control-Allow-Credentials: true");
 
 include('database/connection.php');
 
-$sql = "SELECT name, author, description,
+$sql = "SELECT id, name, author, description,
         price, genre, is_new, img_src
         FROM books";
 

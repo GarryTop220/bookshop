@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'Романтична проза' => "love_novels",
         'Комікси' => "comics"
     ];
-    $target_dir = __DIR__ . "src/assets/photo_books/" . ($genres[$genre] ?? '') . "/";
+	$target_dir = __DIR__ . "/../src/assets/photo_books/" . ($genres[$genre] ?? '') . "/";
     
 
     //перевірка наявності директорії і створення її за потреби

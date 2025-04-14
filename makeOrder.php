@@ -53,7 +53,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     }
     $order_id = $stmt->insert_id;
-
+	
+	$sql = "SELECT id FROM books WHERE id = ?";
+	$checkStmt = $conn->prepare($sql);
+	foreach ($cart_items as $cart_item) {
+		$book_id = $cart_item['book_id'];
+		$checkStmt->bind_param("i", $book_id);
+		$checkStmt->execute();
+		$checkStmt->store_result();
+		
+		if ($checkStmt->num_rows == 0) {
+			echo json_encode(["message" => "Книга з ID $book_id не існує"]);
+			$checkStmt->close();
+			$stmt->close();
+			$conn->close();
+			exit();
+		}
+		
+		for($i = 0; $i < $cart_item['quantity']; $i++) {
+			$stmt->bind_param("ii", $order_id, $book_id);
+			if (!$stmt->execute()) {
+				echo json_encode(["message" => "Помилка додавання книги до замовлення"]);
+				$stmt->close();
+				$conn->close();
+				exit();
+			}
+		}
+	}
+	$checkStmt->close();
+	
     $sql = "INSERT INTO order_details (order_id, book_id) VALUES (?, ?)";
     $stmt = $conn->prepare($sql);
     foreach ($cart_items as $cart_item) {

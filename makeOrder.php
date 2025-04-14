@@ -32,101 +32,108 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $last4Digits = substr($card, -4);
 
-    $sql = "INSERT INTO delivery (town, street, street_number, type) VALUES (?, ?, ?, ?)";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("ssis", $town, $street, $street_number, $deliveryType);
-    if (!$stmt->execute()) {
-        echo json_encode(["message" => "Помилка створення доставки"]);
-        $stmt->close();
-        $conn->close();
-        exit();
-    }
-    $delivery_id = $stmt->insert_id;
+    // Початок транзакції
+    $conn->begin_transaction();
 
-    $sql = "INSERT INTO orders (user_id, total_price, delivery_id, payment_method, card) VALUES (?, ?, ?, ?, ?)";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("idiss", $user_id, $total_price, $delivery_id, $paymentType, $last4Digits);
-    if (!$stmt->execute()) {
-        echo json_encode(["message" => "Помилка створення замовлення"]);
-        $stmt->close();
-        $conn->close();
-        exit();
-    }
-    $order_id = $stmt->insert_id;
-	
-	$sql = "SELECT id FROM books WHERE id = ?";
-	$checkStmt = $conn->prepare($sql);
-	foreach ($cart_items as $cart_item) {
-		$book_id = $cart_item['book_id'];
-		$checkStmt->bind_param("i", $book_id);
-		$checkStmt->execute();
-		$checkStmt->store_result();
-		
-		if ($checkStmt->num_rows == 0) {
-			echo json_encode(["message" => "Книга з ID $book_id не існує"]);
-			$checkStmt->close();
-			$stmt->close();
-			$conn->close();
-			exit();
-		}
-		
-		for($i = 0; $i < $cart_item['quantity']; $i++) {
-			$stmt->bind_param("ii", $order_id, $book_id);
-			if (!$stmt->execute()) {
-				echo json_encode(["message" => "Помилка додавання книги до замовлення"]);
-				$stmt->close();
-				$conn->close();
-				exit();
-			}
-		}
-	}
-	$checkStmt->close();
-	
-    $sql = "INSERT INTO order_details (order_id, book_id) VALUES (?, ?)";
-    $stmt = $conn->prepare($sql);
-    foreach ($cart_items as $cart_item) {
-        for($i = 0; $i<$cart_item['quantity'];$i++ ){
-        if (!isset($cart_item['book_id']) || !is_numeric($cart_item['book_id'])) {
-            echo json_encode(["message" => "Некоректний ідентифікатор книги"]);
-            $stmt->close();
-            $conn->close();
-            exit();
-        }
-        $book_id = $cart_item['book_id'];
-        $stmt->bind_param("ii", $order_id, $book_id);
+    try {
+        // Додавання доставки
+        $sql = "INSERT INTO delivery (town, street, street_number, type) VALUES (?, ?, ?, ?)";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("ssis", $town, $street, $street_number, $deliveryType);
         if (!$stmt->execute()) {
-            echo json_encode(["message" => "Помилка додавання книги до замовлення"]);
-            $stmt->close();
-            $conn->close();
-            exit();
+            throw new Exception("Помилка створення доставки");
         }
-    }
-    }
-    $cart_id = $cart_items[0]['cart_id'];
-
-    $sql = "DELETE FROM cart_details WHERE cart_id = ?";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("i", $cart_id);
-    if (!$stmt->execute()) {
-        echo json_encode(['message' => 'Помилка видалення книги з кошика']);
+        $delivery_id = $stmt->insert_id;
         $stmt->close();
+
+        // Додавання замовлення
+        $sql = "INSERT INTO orders (user_id, total_price, delivery_id, payment_method, card) VALUES (?, ?, ?, ?, ?)";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("idiss", $user_id, $total_price, $delivery_id, $paymentType, $last4Digits);
+        if (!$stmt->execute()) {
+            throw new Exception("Помилка створення замовлення");
+        }
+        $order_id = $stmt->insert_id;
+        $stmt->close();
+
+        // Перевірка наявності книг перед додаванням до замовлення
+        $checkSql = "SELECT id FROM books WHERE id = ?";
+        $checkStmt = $conn->prepare($checkSql);
+        
+        // Додавання деталей замовлення
+        $detailSql = "INSERT INTO order_details (order_id, book_id) VALUES (?, ?)";
+        $detailStmt = $conn->prepare($detailSql);
+        
+        foreach ($cart_items as $cart_item) {
+            if (!isset($cart_item['book_id']) || !is_numeric($cart_item['book_id'])) {
+                throw new Exception("Некоректний ідентифікатор книги");
+            }
+            
+            $book_id = $cart_item['book_id'];
+            
+            // Перевірка чи книга існує
+            $checkStmt->bind_param("i", $book_id);
+            $checkStmt->execute();
+            $checkStmt->store_result();
+            
+            if ($checkStmt->num_rows == 0) {
+                throw new Exception("Книга з ID $book_id не існує");
+            }
+            
+            // Додавання кількості екземплярів книги
+            for($i = 0; $i < $cart_item['quantity']; $i++) {
+                $detailStmt->bind_param("ii", $order_id, $book_id);
+                if (!$detailStmt->execute()) {
+                    throw new Exception("Помилка додавання книги до замовлення");
+                }
+            }
+        }
+        
+        $checkStmt->close();
+        $detailStmt->close();
+
+        // Очищення кошика
+        if (!empty($cart_items)) {
+            $cart_id = $cart_items[0]['cart_id'];
+            
+            $deleteSql = "DELETE FROM cart_details WHERE cart_id = ?";
+            $deleteStmt = $conn->prepare($deleteSql);
+            $deleteStmt->bind_param("i", $cart_id);
+            if (!$deleteStmt->execute()) {
+                throw new Exception('Помилка видалення книги з кошика');
+            }
+            $deleteStmt->close();
+            
+            $updateSql = "UPDATE cart SET total_price = ? WHERE id = ?";
+            $updateStmt = $conn->prepare($updateSql);
+            $new_total_price = 0;
+            $updateStmt->bind_param("di", $new_total_price, $cart_id);
+            if (!$updateStmt->execute()) {
+                throw new Exception('Помилка оновлення загальної суми');
+            }
+            $updateStmt->close();
+        }
+
+        // Підтвердження транзакції
+        $conn->commit();
+        echo json_encode(['message' => 'Замовлення оформлене успішно']);
+        
+    } catch (Exception $e) {
+        // Відкат транзакції у разі помилки
+        $conn->rollback();
+        echo json_encode(['message' => $e->getMessage()]);
+        
+        // Закриття з'єднання
+        if (isset($stmt) && $stmt) $stmt->close();
+        if (isset($checkStmt) && $checkStmt) $checkStmt->close();
+        if (isset($detailStmt) && $detailStmt) $detailStmt->close();
+        if (isset($deleteStmt) && $deleteStmt) $deleteStmt->close();
+        if (isset($updateStmt) && $updateStmt) $updateStmt->close();
+        
         $conn->close();
         exit();
     }
-
-    $sql = "UPDATE cart SET total_price = ? WHERE id = ?";
-    $stmt = $conn->prepare($sql);
-    $new_total_price = 0;
-    $stmt->bind_param("di", $new_total_price, $cart_id);
-    if (!$stmt->execute()) {
-        echo json_encode(['message' => 'Помилка оновлення загальної суми']);
-        $stmt->close();
-        $conn->close();
-        exit();
-    }
-
-    echo json_encode(['message' => 'Замовлення оформлене успішно']);
-    $stmt->close();
 }
+
 $conn->close();
 ?>

@@ -1,8 +1,16 @@
 <?php
+// Отримуємо шлях з URL
 $request_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$file_path = '/tmp/storage' . $request_path;
 
-error_log("Requested file: " . $file_path); // Для дебагу
+// Видаляємо /static.php з початку шляху
+$file_relative_path = str_replace('/static.php', '', $request_path);
+
+// Абсолютний шлях до файлу (змініть на свій реальний шлях)
+$storage_base = '/tmp/storage'; // або '/data/storage' якщо використовуєте том
+$file_path = $storage_base . $file_relative_path;
+
+// Для дебагу - можна пізніше видалити
+error_log("Шукаємо файл: " . $file_path);
 
 if (file_exists($file_path)) {
     $mime_types = [
@@ -22,5 +30,5 @@ if (file_exists($file_path)) {
 }
 
 http_response_code(404);
-echo 'Файл не знайдено: ' . $request_path;
+echo 'Файл не знайдено. Шукали за шляхом: ' . $file_path;
 ?>

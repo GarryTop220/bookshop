@@ -8,9 +8,9 @@ header("Access-Control-Allow-Credentials: true");
 include('database/connection.php');
 include('database/domain.php');
 
-function log_error($message) {
-    error_log($message);
-    return json_encode(['error' => $message]);
+function log_error($message, $details = []) {
+    error_log($message . ' ' . json_encode($details));
+    return json_encode(['error' => $message, 'details' => $details]);
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -44,21 +44,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     ];
     
     $genre_folder = $genres[$genre] ?? 'other';
-    
-    // Шлях для зберігання - використовуємо /tmp/ на Railway
     $storage_path = '/tmp/storage/books/';
     $target_dir = $storage_path . $genre_folder . '/';
 
     // Створення директорій
     if (!file_exists($storage_path)) {
         if (!mkdir($storage_path, 0777, true)) {
-            die(log_error("Не вдалося створити кореневу директорію для зберігання"));
+            die(log_error("Не вдалося створити кореневу директорію для зберігання", [
+                'path' => $storage_path,
+                'permissions' => substr(sprintf('%o', fileperms(dirname($storage_path))), -4)
+            ]));
         }
     }
     
     if (!file_exists($target_dir)) {
         if (!mkdir($target_dir, 0777, true)) {
-            die(log_error("Не вдалося створити директорію для жанру"));
+            die(log_error("Не вдалося створити директорію для жанру", [
+                'path' => $target_dir,
+                'parent_permissions' => substr(sprintf('%o', fileperms($storage_path)), -4)
+            ]));
         }
     }
 
@@ -82,33 +86,75 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         die(log_error("Розмір файлу перевищує 5MB"));
     }
 
-    // Завантаження файлу
+    // Завантаження файлу з детальним логуванням
+    error_log("Спроба завантажити файл з temp_path: {$image['tmp_name']} до {$target_file}");
+    
     if (!move_uploaded_file($image['tmp_name'], $target_file)) {
-        die(log_error("Помилка завантаження файлу: " . error_get_last()['message']));
+        $error = error_get_last();
+        die(log_error("Помилка завантаження файлу", [
+            'error_details' => $error,
+            'source_path' => $image['tmp_name'],
+            'target_path' => $target_file,
+            'target_dir_exists' => file_exists($target_dir),
+            'target_dir_writable' => is_writable($target_dir),
+            'free_space' => disk_free_space($target_dir)
+        ]));
     }
+
+    // Додаткова перевірка після завантаження
+    if (!file_exists($target_file)) {
+        die(log_error("Файл не збережено на сервері", [
+            'expected_path' => $target_file,
+            'directory_listing' => scandir($target_dir)
+        ]));
+    }
+
+    // Перевірка розміру збереженого файлу
+    if (filesize($target_file) === 0) {
+        unlink($target_file);
+        die(log_error("Збережений файл має нульовий розмір"));
+    }
+
+    // Формування URL через static.php
+    $img_src = $domain . '/static.php/storage/books/' . $genre_folder . '/' . $new_filename;
 
     // Збереження в БД
     try {
-        // Формуємо URL через static.php
-        $img_src = $domain . '/static.php/storage/books/' . $genre_folder . '/' . $new_filename;
-        
         $stmt = $conn->prepare("INSERT INTO books(name, author, description, price, genre, img_src, is_new) VALUES (?, ?, ?, ?, ?, ?, ?)");
         $stmt->bind_param("sssdssi", $name, $author, $description, $price, $genre, $img_src, $isNew);
         
         if (!$stmt->execute()) {
             unlink($target_file);
-            die(log_error("Помилка бази даних: " . $stmt->error));
+            die(log_error("Помилка бази даних", [
+                'db_error' => $stmt->error,
+                'query' => $stmt->errno
+            ]));
+        }
+
+        // Додаткова перевірка, чи файл досі існує після запису в БД
+        if (!file_exists($target_file)) {
+            error_log("ПОПЕРЕДЖЕННЯ: Файл зник після запису в БД: {$target_file}");
         }
 
         echo json_encode([
             'success' => true,
             'message' => 'Книга додана успішно',
-            'image_url' => $img_src
+            'image_url' => $img_src,
+            'local_path' => $target_file, // Тільки для налагодження
+            'file_info' => [
+                'size' => filesize($target_file),
+                'mime' => mime_content_type($target_file)
+            ]
         ]);
 
     } catch (Exception $e) {
-        if (file_exists($target_file)) unlink($target_file);
-        die(log_error("Системна помилка: " . $e->getMessage()));
+        if (file_exists($target_file)) {
+            unlink($target_file);
+        }
+        die(log_error("Системна помилка", [
+            'exception' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]));
     } finally {
         if (isset($stmt)) $stmt->close();
         $conn->close();

@@ -34,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $genre = trim($_POST['genre']);
     $isNew = isset($_POST['isNew']) ? (int)$_POST['isNew'] : 0;
 
-    // Визначення шляху для зберігання
+    // Визначення структури папок
     $genres = [
         'Детективи' => "detective",
         'Фентезі' => "fantasy",
@@ -44,36 +44,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     ];
     
     $genre_folder = $genres[$genre] ?? 'other';
-    $storage_path = '/storage/books/'; // Змінено шлях для Railway
+    
+    // Шлях для зберігання - використовуємо /tmp/ на Railway
+    $storage_path = '/tmp/storage/books/';
     $target_dir = $storage_path . $genre_folder . '/';
 
-    // Створення директорії з правильними дозволами
+    // Спробуємо створити директорії
     if (!file_exists($storage_path)) {
-        mkdir($storage_path, 0777, true);
+        if (!mkdir($storage_path, 0777, true)) {
+            die(log_error("Не вдалося створити кореневу директорію для зберігання"));
+        }
     }
     
     if (!file_exists($target_dir)) {
-        mkdir($target_dir, 0777, true);
-    }
-
-    // Додаткова перевірка дозволів
-    if (!is_writable($target_dir)) {
-        chmod($target_dir, 0777);
-        if (!is_writable($target_dir)) {
-            die(log_error("Не вдалося отримати права на запис в директорію"));
+        if (!mkdir($target_dir, 0777, true)) {
+            die(log_error("Не вдалося створити директорію для жанру"));
         }
     }
 
     // Обробка зображення
     $image = $_FILES['image'];
     $ext = strtolower(pathinfo($image['name'], PATHINFO_EXTENSION));
-    $new_filename = uniqid('book_', true) . '.' . $ext;
+    $new_filename = md5(uniqid()) . '.' . $ext; // Унікальне ім'я файлу
     $target_file = $target_dir . $new_filename;
 
     // Валідація зображення
     $allowed = ['jpg', 'jpeg', 'png', 'gif'];
-    if (!in_array($ext, $allowed) || !getimagesize($image['tmp_name'])) {
-        die(log_error("Недійсний формат зображення"));
+    if (!in_array($ext, $allowed)) {
+        die(log_error("Дозволені лише JPG, JPEG, PNG та GIF файли"));
+    }
+
+    if (!getimagesize($image['tmp_name'])) {
+        die(log_error("Файл не є зображенням"));
     }
 
     if ($image['size'] > 5000000) {
@@ -82,12 +84,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Завантаження файлу
     if (!move_uploaded_file($image['tmp_name'], $target_file)) {
-        die(log_error("Помилка завантаження файлу"));
+        die(log_error("Помилка завантаження файлу: " . error_get_last()['message']));
     }
 
     // Збереження в БД
     try {
-        $img_src = $domain . '/storage/books/' . $genre_folder . '/' . $new_filename;
+        // Зберігаємо відносний шлях
+        $img_relative_path = 'storage/books/' . $genre_folder . '/' . $new_filename;
+        $img_src = $domain . '/' . $img_relative_path;
         
         $stmt = $conn->prepare("INSERT INTO books(name, author, description, price, genre, img_src, is_new) VALUES (?, ?, ?, ?, ?, ?, ?)");
         $stmt->bind_param("sssdssi", $name, $author, $description, $price, $genre, $img_src, $isNew);
@@ -100,7 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         echo json_encode([
             'success' => true,
             'message' => 'Книга додана успішно',
-            'image_path' => $img_src
+            'image_url' => $img_src
         ]);
 
     } catch (Exception $e) {

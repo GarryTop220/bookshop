@@ -8,19 +8,34 @@ header("Access-Control-Allow-Credentials: true");
 include('database/connection.php');
 include('database/domain.php');
 
+// Функція для логування помилок
+function log_error($message) {
+    error_log($message);
+    return json_encode(['error' => $message]);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    //перевірка наявності обов'язкових даних
-    if (empty($_POST['name']) || empty($_POST['author']) || empty($_POST['description']) || empty($_POST['price']) || empty($_POST['genre']) || empty($_FILES['image'])) {
-        die(json_encode(['error' => 'Не всі необхідні дані були надіслані.']));
+    // Перевірка наявності обов'язкових даних
+    $required_fields = ['name', 'author', 'description', 'price', 'genre'];
+    foreach ($required_fields as $field) {
+        if (empty($_POST[$field])) {
+            die(log_error("Необхідне поле '$field' відсутнє."));
+        }
     }
 
-    $name = $_POST['name'];
-    $author = $_POST['author'];
-    $description = $_POST['description'];
-    $price = $_POST['price'];
-    $genre = $_POST['genre'];
-    $isNew = isset($_POST['isNew']) ? $_POST['isNew'] : 0;
+    if (empty($_FILES['image'])) {
+        die(log_error("Зображення не було завантажено."));
+    }
 
+    // Отримання даних з форми
+    $name = trim($_POST['name']);
+    $author = trim($_POST['author']);
+    $description = trim($_POST['description']);
+    $price = (float)$_POST['price'];
+    $genre = trim($_POST['genre']);
+    $isNew = isset($_POST['isNew']) ? (int)$_POST['isNew'] : 0;
+
+    // Визначення шляхів для зображень
     $genres = [
         'Детективи' => "detective",
         'Фентезі' => "fantasy",
@@ -28,58 +43,92 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'Романтична проза' => "love_novels",
         'Комікси' => "comics"
     ];
-	$target_dir = __DIR__ . "/src/assets/photo_books/" . ($genres[$genre] ?? '') . "/";
-    
 
-    //перевірка наявності директорії і створення її за потреби
-    if (!is_dir($target_dir)) {
-        mkdir($target_dir, 0777, true);
+    $genre_folder = $genres[$genre] ?? 'other';
+    $base_dir = __DIR__ . '/src/assets/photo_books/';
+    $target_dir = $base_dir . $genre_folder . '/';
+
+    // Створення директорій, якщо вони не існують
+    if (!file_exists($base_dir)) {
+        if (!mkdir($base_dir, 0777, true)) {
+            die(log_error("Не вдалося створити базову директорію для зображень."));
+        }
     }
 
-    //перевірка та переміщення зображення на сервер
-    $target_file = $target_dir . basename($_FILES["image"]["name"]);
-    $uploadOk = 1;
-    $imageFileType = strtolower(pathinfo($target_file, PATHINFO_EXTENSION));
-
-    //перевірка, чи файл є зображенням
-    $check = getimagesize($_FILES["image"]["tmp_name"]);
-    if ($check === false) {
-        die(json_encode(['error' => 'Файл не є зображенням.']));
+    if (!file_exists($target_dir)) {
+        if (!mkdir($target_dir, 0777, true)) {
+            die(log_error("Не вдалося створити директорію для жанру."));
+        }
     }
 
-    //перевірка розміру файлу
-    if ($_FILES["image"]["size"] > 5000000) {
-        die(json_encode(['error' => 'Файл зображення занадто великий.']));
+    // Перевірка прав доступу
+    if (!is_writable($target_dir)) {
+        die(log_error("Директорія не доступна для запису: " . $target_dir));
     }
 
-    //дозволені формати файлів
-    if ($imageFileType != "jpg" && $imageFileType != "png" && $imageFileType != "jpeg" && $imageFileType != "gif") {
-        die(json_encode(['error' => 'Дозволені лише JPG, JPEG, PNG та GIF файли.']));
+    // Обробка зображення
+    $image = $_FILES['image'];
+    $original_name = basename($image['name']);
+    $file_extension = strtolower(pathinfo($original_name, PATHINFO_EXTENSION));
+    $new_filename = uniqid('book_', true) . '.' . $file_extension;
+    $target_file = $target_dir . $new_filename;
+
+    // Перевірка типу файлу
+    $allowed_types = ['jpg', 'jpeg', 'png', 'gif'];
+    if (!in_array($file_extension, $allowed_types)) {
+        die(log_error("Дозволені лише JPG, JPEG, PNG та GIF файли."));
     }
 
-    //збереження зображення
-    if (!move_uploaded_file($_FILES["image"]["tmp_name"], $target_file)) {
-        die(json_encode(['error' => 'Сталася помилка при завантаженні зображення.']));
+    // Перевірка, чи файл є зображенням
+    if (!getimagesize($image['tmp_name'])) {
+        die(log_error("Файл не є зображенням."));
     }
 
-    $img_relative_path = "src/assets/photo_books/" . ($genres[$genre] ?? '') . "/" . basename($_FILES["image"]["name"]);
+    // Перевірка розміру файлу (макс. 5MB)
+    if ($image['size'] > 5000000) {
+        die(log_error("Файл зображення занадто великий. Максимальний розмір: 5MB."));
+    }
+
+    // Переміщення завантаженого файлу
+    if (!move_uploaded_file($image['tmp_name'], $target_file)) {
+        $error = error_get_last();
+        die(log_error("Помилка при завантаженні зображення: " . ($error['message'] ?? 'невідома помилка')));
+    }
+
+    // Формування URL зображення
+    $img_relative_path = "src/assets/photo_books/$genre_folder/$new_filename";
     $img_src = $domain . $img_relative_path;
 
-    //вставка книги в таблицю book 
-    $sql = "INSERT INTO books(name, author, description, price, genre, img_src, is_new) VALUES (?, ?, ?, ?, ?, ?, ?)";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("sssdssi", $name, $author, $description, $price, $genre, $img_src, $isNew);
+    // Додавання книги до бази даних
+    try {
+        $sql = "INSERT INTO books(name, author, description, price, genre, img_src, is_new) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("sssdssi", $name, $author, $description, $price, $genre, $img_src, $isNew);
+        
+        if (!$stmt->execute()) {
+            // Якщо помилка в БД, видаляємо завантажене зображення
+            unlink($target_file);
+            die(log_error("Помилка при додаванні книги: " . $stmt->error));
+        }
 
-    if ($stmt->execute()) {
-        echo json_encode(['message' => 'Книга успішно додана.']);
-    } else {
-        echo json_encode(['error' => 'Помилка при додаванні книги: ' . $stmt->error]);
-    }
+        echo json_encode([
+            'success' => true,
+            'message' => 'Книга успішно додана.',
+            'book' => [
+                'name' => $name,
+                'author' => $author,
+                'img_src' => $img_src
+            ]
+        ]);
 
-    $stmt->close();
-    if (isset($insert_genre_stmt)) {
-        $insert_genre_stmt->close();
+    } catch (Exception $e) {
+        unlink($target_file);
+        die(log_error("Виникла помилка: " . $e->getMessage()));
+    } finally {
+        if (isset($stmt)) $stmt->close();
+        $conn->close();
     }
-    $conn->close();
+} else {
+    die(log_error("Метод не дозволений."));
 }
 ?>

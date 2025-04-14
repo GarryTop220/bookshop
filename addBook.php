@@ -15,8 +15,8 @@ function log_error($message) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Валідація вхідних даних
-    $required = ['name', 'author', 'description', 'price', 'genre'];
-    foreach ($required as $field) {
+    $required_fields = ['name', 'author', 'description', 'price', 'genre'];
+    foreach ($required_fields as $field) {
         if (empty($_POST[$field])) {
             die(log_error("Необхідне поле '$field' відсутнє"));
         }
@@ -49,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $storage_path = '/tmp/storage/books/';
     $target_dir = $storage_path . $genre_folder . '/';
 
-    // Спробуємо створити директорії
+    // Створення директорій
     if (!file_exists($storage_path)) {
         if (!mkdir($storage_path, 0777, true)) {
             die(log_error("Не вдалося створити кореневу директорію для зберігання"));
@@ -65,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Обробка зображення
     $image = $_FILES['image'];
     $ext = strtolower(pathinfo($image['name'], PATHINFO_EXTENSION));
-    $new_filename = md5(uniqid()) . '.' . $ext; // Унікальне ім'я файлу
+    $new_filename = md5(uniqid()) . '.' . $ext;
     $target_file = $target_dir . $new_filename;
 
     // Валідація зображення
@@ -89,9 +89,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Збереження в БД
     try {
-        // Зберігаємо відносний шлях
-        $img_relative_path = 'storage/books/' . $genre_folder . '/' . $new_filename;
-        $img_src = $domain . '/' . $img_relative_path;
+        // Формуємо URL через static.php
+        $img_src = $domain . '/static.php/storage/books/' . $genre_folder . '/' . $new_filename;
         
         $stmt = $conn->prepare("INSERT INTO books(name, author, description, price, genre, img_src, is_new) VALUES (?, ?, ?, ?, ?, ?, ?)");
         $stmt->bind_param("sssdssi", $name, $author, $description, $price, $genre, $img_src, $isNew);

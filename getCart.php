@@ -16,13 +16,13 @@ $sql = "SELECT cart.id AS cart_id,
         cart_details.id AS cart_details_id,
         cart_details.book_id,
         COUNT(cart_details.book_id) AS quantity,
-        book.price,
-        book.name,
-        book.img_src,
-        book.author
+        books.price,
+        books.name,
+        books.img_src,
+        books.author
         FROM cart
         JOIN cart_details ON cart.id = cart_details.cart_id
-        JOIN book ON cart_details.book_id = book.id
+        JOIN books ON cart_details.book_id = books.id
         WHERE cart.user_id = ?
         GROUP BY cart_details.book_id";
 

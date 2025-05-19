@@ -21,4 +21,5 @@ $genres = $result->fetch_all(MYSQLI_ASSOC);
 $conn->close();
 
 echo json_encode($genres);
+
 ?>
